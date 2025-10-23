@@ -2344,7 +2344,7 @@ class TemplateDialog:
 class PDFEmailSenderGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title(f"{MAIN_NAME}! PDF 자동 이메일 발송 프로그램")
+        self.root.title(f"{MAIN_NAME}! PDF 자동 이메일 발송 프로그램 v{VERSION}")
         self.root.geometry("900x700")
 
         # 초기화 중 로그 버퍼
