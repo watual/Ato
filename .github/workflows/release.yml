@@ -38,6 +38,57 @@ jobs:
         run: |
           pyinstaller -F -w -i favicon/favicon.ico --add-data "favicon;favicon" -n Ato pdf_email_sender_gui.py
 
+      - name: Install Windows SDK for signtool
+        run: |
+          choco install windows-sdk-10-version-2004-all -y
+        shell: pwsh
+
+      - name: Self-sign exe
+        run: |
+          $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=AtoSelfSigned" -KeyExportPolicy Exportable -KeyUsage DigitalSignature -CertStoreLocation "Cert:\CurrentUser\My"
+          $pfxPath = "temp_cert.pfx"
+          $pfxPassword = ConvertTo-SecureString "temppass123" -AsPlainText -Force
+          Export-PfxCertificate -Cert $cert -FilePath $pfxPath -Password $pfxPassword
+          
+          $signtoolPaths = @(
+            "C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64\signtool.exe",
+            "C:\Program Files (x86)\Windows Kits\10\bin\10.0.22000.0\x64\signtool.exe",
+            "C:\Program Files (x86)\Windows Kits\10\bin\10.0.19041.0\x64\signtool.exe",
+            "C:\Program Files (x86)\Windows Kits\10\bin\x64\signtool.exe"
+          )
+          
+          $signtool = $null
+          foreach ($path in $signtoolPaths) {
+            if (Test-Path $path) {
+              $signtool = $path
+              break
+            }
+          }
+          
+          if ($null -eq $signtool) {
+            Write-Error "signtool.exe not found even after SDK installation"
+            exit 1
+          }
+          
+          Write-Host "Using signtool: $signtool"
+          & $signtool sign /f $pfxPath /p "temppass123" /fd sha256 /td sha256 /tr http://timestamp.sectigo.com dist\Ato.exe
+          
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Signing failed"
+            exit 1
+          }
+          
+          $signature = Get-AuthenticodeSignature dist\Ato.exe
+          Write-Host "Signature Status: $($signature.Status)"
+          
+          if ($signature.Status -eq "NotSigned") {
+            Write-Error "File is not signed"
+            exit 1
+          }
+          
+          Remove-Item -Force $pfxPath -ErrorAction SilentlyContinue
+        shell: pwsh
+
       - name: Zip artifact
         run: |
           powershell -Command "Compress-Archive -Path dist\\Ato.exe -DestinationPath dist\\Ato_windows_v${{ steps.get_version.outputs.VERSION }}.zip -Force"
