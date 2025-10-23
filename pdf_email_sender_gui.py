@@ -23,6 +23,13 @@ from tkinter import ttk, scrolledtext, messagebox, filedialog
 import tkinter as tk
 VERSION = "1.0.0"  # 프로그램 버전
 MAIN_NAME = "Ato"
+# 파일 및 폴더명에 사용할 prefix (MAIN_NAME이 있으면 "MAIN_NAME_", 없으면 빈 문자열)
+NAME_PREFIX = f"{MAIN_NAME}_" if MAIN_NAME else ""
+
+
+def get_main_name():
+    """MAIN_NAME을 반환하는 함수 (배치 파일에서 호출용)"""
+    return MAIN_NAME
 
 
 class ConfigManager:
@@ -39,20 +46,13 @@ class ConfigManager:
             # Python 스크립트로 실행 중
             base_dir = Path(__file__).parent
 
-        # MAIN_NAME이 있으면 접두사 추가
-        if MAIN_NAME:
-            self.config_file = base_dir / f'{MAIN_NAME}_settings.json'
-        else:
-            self.config_file = base_dir / 'Ato_settings.json'
+        # NAME_PREFIX를 사용하여 설정 파일명 생성
+        self.config_file = base_dir / f'{NAME_PREFIX}settings.json'
 
         # 기본 설정
-        # MAIN_NAME이 있으면 폴더명에 접두사 추가
-        if MAIN_NAME:
-            pdf_folder_name = f'{MAIN_NAME}_전송할PDF'
-            completed_folder_name = f'{MAIN_NAME}_전송완료'
-        else:
-            pdf_folder_name = '전송할PDF'
-            completed_folder_name = '전송완료'
+        # NAME_PREFIX를 사용하여 폴더명 생성
+        pdf_folder_name = f'{NAME_PREFIX}전송할PDF'
+        completed_folder_name = f'{NAME_PREFIX}전송완료'
 
         self.default_config = {
             'email': {
@@ -2564,12 +2564,8 @@ class PDFEmailSenderGUI:
                 base_dir = Path.cwd()
 
             # MAIN_NAME이 있으면 폴더명에 접두사 추가
-            if MAIN_NAME:
-                pdf_folder = base_dir / f'{MAIN_NAME}_전송할PDF'
-                completed_folder = base_dir / f'{MAIN_NAME}_전송완료'
-            else:
-                pdf_folder = base_dir / 'Ato_전송할PDF'
-                completed_folder = base_dir / 'Ato_전송완료'
+            pdf_folder = base_dir / f'{NAME_PREFIX}전송할PDF'
+            completed_folder = base_dir / f'{NAME_PREFIX}전송완료'
 
             pdf_folder.mkdir(exist_ok=True)
             completed_folder.mkdir(exist_ok=True)
@@ -2758,7 +2754,7 @@ class PDFEmailSenderGUI:
         if y < 0:
             y = 0
 
-        dialog.geometry(f"400x200+{x}+{y}")
+        dialog.geometry(f"350x200+{x}+{y}")
 
         # 배경색 설정
         dialog.configure(bg='#f8f9fa')
@@ -2804,6 +2800,12 @@ class PDFEmailSenderGUI:
 
         # 창 닫기 이벤트 처리
         dialog.protocol("WM_DELETE_WINDOW", on_no)
+        
+        # 엔터 키 바인딩 (발송)
+        dialog.bind('<Return>', lambda e: on_yes())
+        
+        # ESC 키 바인딩 (취소)
+        dialog.bind('<Escape>', lambda e: on_no())
 
         # 포커스 설정
         yes_button.focus_set()
@@ -3390,16 +3392,16 @@ Q. 파일이 인식이 안 돼요?
         # 연결 모니터링 재시작
         if self.get_connection_state():
             self.start_connection_monitor()
-            self.log("▶️ 이메일 발송 완료. 연결 모니터링을 재시작합니다", 'INFO')
+            total = success_count + fail_count
+            if fail_count == 0:
+                self.log(f"✅ 이메일 발송 완료: {total}건 모두 성공", 'INFO')
+            else:
+                self.log(f"⚠️ 이메일 발송 완료: 성공 {success_count}건, 실패 {fail_count}건 (총 {total}건)", 'WARNING')
         
         # 버튼 상태 복원
         self.send_button.config(state='normal', text="이메일 발송하기")
         self.scan_button.config(state='normal')
         
-        # 완료 메시지 표시
-        self._show_custom_message("발송 완료", 
-                           f"이메일 발송이 완료되었습니다.\n\n✓ 성공: {success_count}건\n✗ 실패: {fail_count}건",
-                                 "success")
     
     def _send_emails_error(self, error_msg):
         """이메일 발송 오류 시 UI 업데이트"""
@@ -3865,6 +3867,13 @@ def main():
 
 
 if __name__ == "__main__":
+    # 배치 파일에서 호출될 때만 실행
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "--get-main-name":
+        print(get_main_name())
+        sys.exit(0)
+    
+    # 일반 실행
     main()
 
 
