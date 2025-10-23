@@ -21,10 +21,12 @@ import sys
 import threading
 from tkinter import ttk, scrolledtext, messagebox, filedialog
 import tkinter as tk
-VERSION = "1.0.0"  # 프로그램 버전
+import ctypes
+VERSION = "1.0.1"  # 프로그램 버전
 MAIN_NAME = "Ato"
 # 파일 및 폴더명에 사용할 prefix (MAIN_NAME이 있으면 "MAIN_NAME_", 없으면 빈 문자열)
 NAME_PREFIX = f"{MAIN_NAME}_" if MAIN_NAME else ""
+GLOBAL_VARIABLE = { 'test1': None }
 
 
 def get_main_name():
@@ -2338,6 +2340,7 @@ class TemplateDialog:
         self.dialog.destroy()
 
 
+# GUI 클래스
 class PDFEmailSenderGUI:
     def __init__(self, root):
         self.root = root
@@ -3860,20 +3863,58 @@ Q. 파일이 인식이 안 돼요?
         self._show_custom_message("초기화 완료", "고급 설정이 초기화되었습니다.", "success")
 
 
+def resource_path(relative_path):
+    """PyInstaller로 패키징된 리소스 경로를 반환하는 함수"""
+    try:
+        # PyInstaller가 임시 폴더에 압축 해제한 경로
+        base_path = sys._MEIPASS
+    except Exception:
+        # 일반 Python 실행 시 현재 스크립트 경로
+        base_path = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_path, relative_path)
+
+def set_app_icon(root):
+    """
+    모든 창(향후 생성 Toplevel 포함)에 공통 아이콘 지정.
+    - 반드시 Toplevel 생성 전에 호출할 것.
+    - PNG 권장(256px 등 충분한 해상도). Windows에서는 ICO도 보강 적용.
+    """
+    # 1) iconphoto: 전 플랫폼 공통 기본 아이콘 지정
+    png = resource_path("favicon/favicon-96x96.png")
+    if os.path.exists(png):
+        img = tk.PhotoImage(file=png)
+        root.iconphoto(True, img)      # True: 이후 생성되는 모든 Toplevel에 상속
+        root._icon_ref = img           # GC 방지
+
+    # 2) Windows 보강: 작업표시줄/제목표시줄에 ICO가 필요한 경우
+    if sys.platform == "win32":
+        ico = resource_path("favicon/favicon.ico")
+        if os.path.exists(ico):
+            try:
+                root.iconbitmap(ico)   # 실패해도 무시 가능
+            except Exception:
+                pass
+
+
 def main():
+    if sys.platform == 'win32':
+        try:
+            myappid = f'watual.{MAIN_NAME}.gui.{VERSION}'
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+        except:
+            pass
+
     root = tk.Tk()
+    set_app_icon(root)
     app = PDFEmailSenderGUI(root)
     root.mainloop()
 
 
 if __name__ == "__main__":
     # 배치 파일에서 호출될 때만 실행
-    import sys
     if len(sys.argv) > 1 and sys.argv[1] == "--get-main-name":
         print(get_main_name())
         sys.exit(0)
     
     # 일반 실행
     main()
-
-
