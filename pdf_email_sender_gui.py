@@ -22,7 +22,34 @@ import threading
 from tkinter import ttk, scrolledtext, messagebox, filedialog
 import tkinter as tk
 import ctypes
-VERSION = "1.0.1"  # 프로그램 버전
+
+
+def get_version_from_release_notes():
+    """RELEASE.md에서 버전 정보를 읽어옴"""
+    try:
+        # 실행 파일의 경로 확인
+        if getattr(sys, 'frozen', False):
+            base_dir = Path(sys.executable).parent
+        else:
+            base_dir = Path(__file__).parent
+        
+        release_notes_path = base_dir / "RELEASE.md"
+        
+        if release_notes_path.exists():
+            with open(release_notes_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                # "[-[VERSION:1.0.1]-]" 형식에서 버전 추출
+                match = re.search(r'\[-\[VERSION:(\d+\.\d+\.\d+)\]-\]', content)
+                if match:
+                    return match.group(1)
+    except Exception:
+        pass
+    
+    # 기본값 (RELEASE.md를 찾을 수 없을 때)
+    return "0.0.1"
+
+
+VERSION = get_version_from_release_notes()  # 프로그램 버전
 MAIN_NAME = "Ato"
 # 파일 및 폴더명에 사용할 prefix (MAIN_NAME이 있으면 "MAIN_NAME_", 없으면 빈 문자열)
 NAME_PREFIX = f"{MAIN_NAME}_" if MAIN_NAME else ""
