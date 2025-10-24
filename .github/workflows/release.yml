@@ -44,56 +44,99 @@ jobs:
         run: |
           pyinstaller -F -w -i favicon/favicon.ico --add-data "favicon;favicon" -n Ato pdf_email_sender_gui.py
 
-      - name: Install Windows SDK for signtool
+      - name: Check secrets present
         run: |
-          choco install windows-sdk-10-version-2004-all -y
+          $missing = @()
+          if ([string]::IsNullOrEmpty("${{ secrets.CODESIGN_PFX_BASE64 }}")) { $missing += 'CODESIGN_PFX_BASE64' }
+          if ([string]::IsNullOrEmpty("${{ secrets.CODESIGN_PFX_PASSWORD }}")) { $missing += 'CODESIGN_PFX_PASSWORD' }
+          if ($missing.Count -gt 0) {
+            Write-Error ("Missing secrets: {0}" -f ($missing -join ', '))
+            exit 1
+          }
+          Write-Host "All required secrets are present."
         shell: pwsh
 
-      - name: Self-sign exe
+      - name: Decode codesign PFX
         run: |
-          $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=AtoSelfSigned" -KeyExportPolicy Exportable -KeyUsage DigitalSignature -CertStoreLocation "Cert:\CurrentUser\My"
-          $pfxPath = "temp_cert.pfx"
-          $pfxPassword = ConvertTo-SecureString "temppass123" -AsPlainText -Force
-          Export-PfxCertificate -Cert $cert -FilePath $pfxPath -Password $pfxPassword
+          # Base64로 인코딩된 PFX 인증서를 디코딩하여 파일로 저장
+          $pfxBase64 = "${{ secrets.CODESIGN_PFX_BASE64 }}"
+          $pfxPath = "codesign.pfx"
           
-          $signtoolPaths = @(
-            "C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64\signtool.exe",
-            "C:\Program Files (x86)\Windows Kits\10\bin\10.0.22000.0\x64\signtool.exe",
-            "C:\Program Files (x86)\Windows Kits\10\bin\10.0.19041.0\x64\signtool.exe",
-            "C:\Program Files (x86)\Windows Kits\10\bin\x64\signtool.exe"
-          )
-          
-          $signtool = $null
-          foreach ($path in $signtoolPaths) {
-            if (Test-Path $path) {
-              $signtool = $path
-              break
-            }
-          }
-          
-          if ($null -eq $signtool) {
-            Write-Error "signtool.exe not found even after SDK installation"
+          try {
+            # Base64 디코딩
+            $pfxBytes = [System.Convert]::FromBase64String($pfxBase64)
+            [System.IO.File]::WriteAllBytes($pfxPath, $pfxBytes)
+            Write-Host "PFX certificate decoded and saved: $pfxPath"
+          } catch {
+            Write-Error "Failed to decode PFX certificate: $($_.Exception.Message)"
             exit 1
           }
-          
-          Write-Host "Using signtool: $signtool"
-          & $signtool sign /f $pfxPath /p "temppass123" /fd sha256 /td sha256 /tr http://timestamp.sectigo.com dist\Ato.exe
-          
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "Signing failed"
-            exit 1
-          }
-          
-          $signature = Get-AuthenticodeSignature dist\Ato.exe
-          Write-Host "Signature Status: $($signature.Status)"
-          
-          if ($signature.Status -eq "NotSigned") {
-            Write-Error "File is not signed"
-            exit 1
-          }
-          
-          Remove-Item -Force $pfxPath -ErrorAction SilentlyContinue
         shell: pwsh
+
+      - name: Sign exe with PFX
+        id: sign_exe
+        run: |
+          $pfxPath = "codesign.pfx"
+          $pfxPassword = "${{ secrets.CODESIGN_PFX_PASSWORD }}"
+          
+          # PFX 인증서를 PowerShell 인증서 객체로 로드
+          try {
+            $certPassword = ConvertTo-SecureString $pfxPassword -AsPlainText -Force
+            $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($pfxPath, $certPassword)
+            Write-Host "Certificate loaded: $($cert.Subject)"
+            # 서명 확인 단계에서 비교할 썸프린트 저장 (GitHub Actions outputs)
+            "CERT_THUMBPRINT=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          } catch {
+            Write-Error "Failed to load certificate: $($_.Exception.Message)"
+            exit 1
+          }
+          
+          # PowerShell Set-AuthenticodeSignature으로 서명
+          try {
+            $signature = Set-AuthenticodeSignature -FilePath "dist\Ato.exe" -Certificate $cert -TimestampServer "http://timestamp.sectigo.com"
+            Write-Host "Signing completed with status: $($signature.Status)"
+            if ($signature.Status -eq "NotSigned" -or $signature.Status -eq "HashMismatch") {
+              Write-Error "Signing failed: $($signature.Status)"
+              exit 1
+            }
+          } catch {
+            Write-Error "Signing failed: $($_.Exception.Message)"
+            exit 1
+          }
+        shell: pwsh
+
+      - name: Verify signature
+        run: |
+          $expectedThumb = "${{ steps.sign_exe.outputs.CERT_THUMBPRINT }}"
+          $sig = Get-AuthenticodeSignature "dist\Ato.exe"
+          Write-Host "Signature Status: $($sig.Status)"
+          if ($null -ne $sig.SignerCertificate) {
+            Write-Host "Signer Thumbprint: $($sig.SignerCertificate.Thumbprint)"
+            Write-Host "Signer Subject   : $($sig.SignerCertificate.Subject)"
+            Write-Host "Valid From       : $($sig.SignerCertificate.NotBefore)"
+            Write-Host "Valid To         : $($sig.SignerCertificate.NotAfter)"
+          }
+          
+          $now = Get-Date
+          $isThumbMatch = ($null -ne $sig.SignerCertificate) -and ($sig.SignerCertificate.Thumbprint -ieq $expectedThumb)
+          $hasTimestamp = ($null -ne $sig.TimeStamperCertificate)
+          $isTimeValid = ($null -ne $sig.SignerCertificate) -and ($now -ge $sig.SignerCertificate.NotBefore) -and ($now -le $sig.SignerCertificate.NotAfter)
+          
+          # 판정 로직
+          if ($sig.Status -eq "Valid") {
+            Write-Host "✅ Valid signature"
+            exit 0
+          }
+          elseif (($sig.Status -in @("UnknownError","NotTrusted")) -and $isThumbMatch -and ($hasTimestamp -or $isTimeValid)) {
+            Write-Host "✅ Self-signed accepted (thumbprint match + timestamp or in-period)"
+            exit 0
+          }
+          else {
+            Write-Error ("❌ Signature verification failed. Status: {0}, Thumb match: {1}, TS: {2}, InPeriod: {3}" -f $sig.Status, $isThumbMatch, $hasTimestamp, $isTimeValid)
+            exit 1
+          }
+        shell: pwsh
+
 
       - name: Prepare Release Notes
         run: |
@@ -111,10 +154,6 @@ jobs:
           }
         shell: pwsh
 
-      - name: Zip artifact
-        run: |
-          powershell -Command "Compress-Archive -Path dist\\Ato.exe -DestinationPath dist\\Ato-v${{ steps.get_version.outputs.VERSION }}-windows.zip -Force"
-
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -122,7 +161,7 @@ jobs:
           name: Release v${{ steps.get_version.outputs.VERSION }}
           body_path: release_body.md
           files: |
-            dist/Ato-v${{ steps.get_version.outputs.VERSION }}-windows.zip
+            dist/Ato.exe
           draft: false
           prerelease: false
         env:

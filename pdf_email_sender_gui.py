@@ -223,6 +223,36 @@ class ConfigManager:
         self.config = self.load_config()
 
 
+def center_window(child_window, parent_window, width=None, height=None):
+    """창을 부모 창의 중앙에 위치시키는 함수"""
+    child_window.update_idletasks()
+    parent_window.update_idletasks()
+    
+    # 부모 창의 위치와 크기 가져오기
+    parent_x = parent_window.winfo_x()
+    parent_y = parent_window.winfo_y()
+    parent_width = parent_window.winfo_width()
+    parent_height = parent_window.winfo_height()
+    
+    # 자식 창 크기 결정
+    if width is None:
+        width = child_window.winfo_width()
+    if height is None:
+        height = child_window.winfo_height()
+    
+    # 중앙 위치 계산
+    x = parent_x + (parent_width - width) // 2
+    y = parent_y + (parent_height - height) // 2
+    
+    # 화면 밖으로 나가지 않도록 조정
+    if x < 0:
+        x = 0
+    if y < 0:
+        y = 0
+    
+    child_window.geometry(f"{width}x{height}+{x}+{y}")
+
+
 class SettingsDialog:
     """설정 대화상자"""
 
@@ -240,7 +270,6 @@ class SettingsDialog:
 
         self.dialog = tk.Toplevel(parent)
         self.dialog.title("설정")
-        self.dialog.geometry("650x600")
         self.dialog.resizable(True, True)
         self.dialog.transient(parent)
 
@@ -248,27 +277,8 @@ class SettingsDialog:
         self.dialog.update_idletasks()
         parent.update_idletasks()
 
-        # 부모 창의 위치와 크기 가져오기
-        parent_x = parent.winfo_x()
-        parent_y = parent.winfo_y()
-        parent_width = parent.winfo_width()
-        parent_height = parent.winfo_height()
-
-        # 다이얼로그 크기
-        dialog_width = self.dialog.winfo_width()
-        dialog_height = self.dialog.winfo_height()
-
-        # 중앙 위치 계산
-        x = parent_x + (parent_width - dialog_width) // 2
-        y = parent_y + (parent_height - dialog_height) // 2
-
-        # 화면 밖으로 나가지 않도록 조정
-        if x < 0:
-            x = 0
-        if y < 0:
-            y = 0
-
-        self.dialog.geometry(f"+{x}+{y}")
+        # 중앙 위치 설정
+        center_window(self.dialog, parent, 700, 650)
         self.dialog.grab_set()
 
         self.setup_ui()
@@ -307,9 +317,86 @@ class SettingsDialog:
             try:
                 if self.parent_gui:
                     self.parent_gui.log("  - 이메일 설정 탭 생성 중...", is_debug=True)
-                email_frame = ttk.Frame(notebook, padding="10")
-                notebook.add(email_frame, text="📧 이메일 설정")
-                self.setup_email_tab(email_frame)
+                
+                # 스크롤 가능한 프레임 생성
+                email_container = tk.Frame(notebook)
+                notebook.add(email_container, text="📧 이메일 설정")
+                
+                # Canvas와 Scrollbar - 가로/세로 스크롤
+                email_canvas = tk.Canvas(email_container, highlightthickness=0)
+                email_v_scrollbar = ttk.Scrollbar(email_container, orient="vertical", command=email_canvas.yview)
+                email_h_scrollbar = ttk.Scrollbar(email_container, orient="horizontal", command=email_canvas.xview)
+                
+                # 스크롤 가능한 프레임
+                self.email_frame = tk.Frame(email_canvas)
+                
+                # 프레임을 Canvas에 추가
+                email_canvas_window = email_canvas.create_window((0, 0), window=self.email_frame, anchor="nw")
+                
+                # Frame 크기가 변경될 때 스크롤 영역과 캔버스 윈도우 크기 동기화
+                def email_configure_scroll_region(event=None):
+                    # 프레임이 완전히 렌더링될 때까지 대기
+                    self.email_frame.update_idletasks()
+                    # 요구 크기 계산
+                    req_w = self.email_frame.winfo_reqwidth()
+                    req_h = self.email_frame.winfo_reqheight()
+                    # 현재 캔버스 가시 크기 계산
+                    canvas_width = email_canvas.winfo_width()
+                    canvas_height = email_canvas.winfo_height()
+                    # 캔버스 윈도우 크기를 현재 캔버스 크기와 요구 크기 중 큰 값으로 설정
+                    email_canvas.itemconfigure(email_canvas_window, 
+                                             width=max(canvas_width, req_w), 
+                                             height=max(canvas_height, req_h))
+                    # 스크롤 영역 갱신
+                    email_canvas.configure(scrollregion=email_canvas.bbox("all"))
+                
+                # 클래스 메서드로 저장하여 다른 함수에서 접근 가능하도록 함
+                self.email_configure_scroll_region = email_configure_scroll_region
+                
+                # Canvas 크기가 변경될 때 Frame 크기와 동기화
+                def email_configure_canvas_size(event):
+                    # 프레임이 완전히 렌더링될 때까지 대기
+                    self.email_frame.update_idletasks()
+                    # 요구 크기 재계산
+                    req_w = self.email_frame.winfo_reqwidth()
+                    req_h = self.email_frame.winfo_reqheight()
+                    # 캔버스 윈도우 크기를 이벤트 크기와 요구 크기 중 큰 값으로 설정
+                    email_canvas.itemconfigure(email_canvas_window, 
+                                             width=max(event.width, req_w), 
+                                             height=max(event.height, req_h))
+                    # 스크롤 영역 재설정
+                    email_canvas.configure(scrollregion=email_canvas.bbox("all"))
+                
+                self.email_frame.bind("<Configure>", email_configure_scroll_region)
+                email_canvas.bind("<Configure>", email_configure_canvas_size)
+                email_canvas.configure(yscrollcommand=email_v_scrollbar.set, xscrollcommand=email_h_scrollbar.set)
+                
+                # 마우스 휠 스크롤
+                def email_on_mousewheel(e):
+                    email_canvas.yview_scroll(int(-1*(e.delta/120)), "units")
+                def email_on_shift_mousewheel(e):
+                    email_canvas.xview_scroll(int(-1*(e.delta/120)), "units")
+                
+                def email_bind_wheel(event):
+                    email_canvas.bind_all("<MouseWheel>", email_on_mousewheel)
+                    email_canvas.bind_all("<Shift-MouseWheel>", email_on_shift_mousewheel)
+                
+                def email_unbind_wheel(event):
+                    email_canvas.unbind_all("<MouseWheel>")
+                    email_canvas.unbind_all("<Shift-MouseWheel>")
+                
+                email_canvas.bind("<Enter>", email_bind_wheel)
+                email_canvas.bind("<Leave>", email_unbind_wheel)
+                
+                # 배치
+                email_canvas.grid(row=0, column=0, sticky="nsew")
+                email_v_scrollbar.grid(row=0, column=1, sticky="ns")
+                email_h_scrollbar.grid(row=1, column=0, sticky="ew")
+                
+                email_container.grid_rowconfigure(0, weight=1)
+                email_container.grid_columnconfigure(0, weight=1)
+                
+                self.setup_email_tab(self.email_frame)
                 if self.parent_gui:
                     self.parent_gui.log("  ✓ 이메일 설정 탭 완료", is_debug=True)
             except Exception as e:
@@ -329,8 +416,82 @@ class SettingsDialog:
             try:
                 if self.parent_gui:
                     self.parent_gui.log("  - 이메일 양식 탭 생성 중...", is_debug=True)
-                template_frame = ttk.Frame(notebook, padding="10")
-                notebook.add(template_frame, text="📝 이메일 양식")
+                
+                # 스크롤 가능한 프레임 생성
+                template_container = tk.Frame(notebook)
+                notebook.add(template_container, text="📝 이메일 양식")
+                
+                # Canvas와 Scrollbar
+                template_canvas = tk.Canvas(template_container, highlightthickness=0)
+                template_v_scrollbar = ttk.Scrollbar(template_container, orient="vertical", command=template_canvas.yview)
+                template_h_scrollbar = ttk.Scrollbar(template_container, orient="horizontal", command=template_canvas.xview)
+                
+                # 스크롤 가능한 프레임
+                template_frame = tk.Frame(template_canvas)
+                
+                # 프레임을 Canvas에 추가
+                template_canvas_window = template_canvas.create_window((0, 0), window=template_frame, anchor="nw")
+                
+                # Frame 크기가 변경될 때 스크롤 영역과 캔버스 윈도우 크기 동기화
+                def template_configure_scroll_region(event=None):
+                    # 프레임이 완전히 렌더링될 때까지 대기
+                    template_frame.update_idletasks()
+                    # 요구 크기 계산
+                    req_w = template_frame.winfo_reqwidth()
+                    req_h = template_frame.winfo_reqheight()
+                    # 현재 캔버스 가시 크기 계산
+                    canvas_width = template_canvas.winfo_width()
+                    canvas_height = template_canvas.winfo_height()
+                    # 캔버스 윈도우 크기를 현재 캔버스 크기와 요구 크기 중 큰 값으로 설정
+                    template_canvas.itemconfigure(template_canvas_window, 
+                                                width=max(canvas_width, req_w), 
+                                                height=max(canvas_height, req_h))
+                    # 스크롤 영역 갱신
+                    template_canvas.configure(scrollregion=template_canvas.bbox("all"))
+                
+                # Canvas 크기가 변경될 때 Frame 크기와 동기화
+                def template_configure_canvas_size(event):
+                    # 프레임이 완전히 렌더링될 때까지 대기
+                    template_frame.update_idletasks()
+                    # 요구 크기 재계산
+                    req_w = template_frame.winfo_reqwidth()
+                    req_h = template_frame.winfo_reqheight()
+                    # 캔버스 윈도우 크기를 이벤트 크기와 요구 크기 중 큰 값으로 설정
+                    template_canvas.itemconfigure(template_canvas_window, 
+                                                width=max(event.width, req_w), 
+                                                height=max(event.height, req_h))
+                    # 스크롤 영역 재설정
+                    template_canvas.configure(scrollregion=template_canvas.bbox("all"))
+                
+                template_frame.bind("<Configure>", template_configure_scroll_region)
+                template_canvas.bind("<Configure>", template_configure_canvas_size)
+                template_canvas.configure(yscrollcommand=template_v_scrollbar.set, xscrollcommand=template_h_scrollbar.set)
+                
+                # 마우스 휠 스크롤
+                def template_on_mousewheel(e):
+                    template_canvas.yview_scroll(int(-1*(e.delta/120)), "units")
+                def template_on_shift_mousewheel(e):
+                    template_canvas.xview_scroll(int(-1*(e.delta/120)), "units")
+                
+                def template_bind_wheel(event):
+                    template_canvas.bind_all("<MouseWheel>", template_on_mousewheel)
+                    template_canvas.bind_all("<Shift-MouseWheel>", template_on_shift_mousewheel)
+                
+                def template_unbind_wheel(event):
+                    template_canvas.unbind_all("<MouseWheel>")
+                    template_canvas.unbind_all("<Shift-MouseWheel>")
+                
+                template_canvas.bind("<Enter>", template_bind_wheel)
+                template_canvas.bind("<Leave>", template_unbind_wheel)
+                
+                # 배치
+                template_canvas.grid(row=0, column=0, sticky="nsew")
+                template_v_scrollbar.grid(row=0, column=1, sticky="ns")
+                template_h_scrollbar.grid(row=1, column=0, sticky="ew")
+                
+                template_container.grid_rowconfigure(0, weight=1)
+                template_container.grid_columnconfigure(0, weight=1)
+                
                 self.setup_template_tab(template_frame)
                 if self.parent_gui:
                     self.parent_gui.log("  ✓ 이메일 양식 탭 완료", is_debug=True)
@@ -351,8 +512,82 @@ class SettingsDialog:
             try:
                 if self.parent_gui:
                     self.parent_gui.log("  - 회사 정보 탭 생성 중...", is_debug=True)
-                company_frame = ttk.Frame(notebook, padding="10")
-                notebook.add(company_frame, text="🏢 회사 정보")
+                
+                # 스크롤 가능한 프레임 생성
+                company_container = ttk.Frame(notebook)
+                notebook.add(company_container, text="🏢 회사 정보")
+                
+                # Canvas와 Scrollbar
+                company_canvas = tk.Canvas(company_container, highlightthickness=0)
+                company_v_scrollbar = ttk.Scrollbar(company_container, orient="vertical", command=company_canvas.yview)
+                company_h_scrollbar = ttk.Scrollbar(company_container, orient="horizontal", command=company_canvas.xview)
+                
+                # 스크롤 가능한 프레임
+                company_frame = ttk.Frame(company_canvas, padding="10")
+                
+                # 프레임을 Canvas에 추가
+                company_canvas_window = company_canvas.create_window((0, 0), window=company_frame, anchor="nw")
+                
+                # Frame 크기가 변경될 때 스크롤 영역과 캔버스 윈도우 크기 동기화
+                def company_configure_scroll_region(event=None):
+                    # 프레임이 완전히 렌더링될 때까지 대기
+                    company_frame.update_idletasks()
+                    # 요구 크기 계산
+                    req_w = company_frame.winfo_reqwidth()
+                    req_h = company_frame.winfo_reqheight()
+                    # 현재 캔버스 가시 크기 계산
+                    canvas_width = company_canvas.winfo_width()
+                    canvas_height = company_canvas.winfo_height()
+                    # 캔버스 윈도우 크기를 현재 캔버스 크기와 요구 크기 중 큰 값으로 설정
+                    company_canvas.itemconfigure(company_canvas_window, 
+                                               width=max(canvas_width, req_w), 
+                                               height=max(canvas_height, req_h))
+                    # 스크롤 영역 갱신
+                    company_canvas.configure(scrollregion=company_canvas.bbox("all"))
+                
+                # Canvas 크기가 변경될 때 Frame 크기와 동기화
+                def company_configure_canvas_size(event):
+                    # 프레임이 완전히 렌더링될 때까지 대기
+                    company_frame.update_idletasks()
+                    # 요구 크기 재계산
+                    req_w = company_frame.winfo_reqwidth()
+                    req_h = company_frame.winfo_reqheight()
+                    # 캔버스 윈도우 크기를 이벤트 크기와 요구 크기 중 큰 값으로 설정
+                    company_canvas.itemconfigure(company_canvas_window, 
+                                               width=max(event.width, req_w), 
+                                               height=max(event.height, req_h))
+                    # 스크롤 영역 재설정
+                    company_canvas.configure(scrollregion=company_canvas.bbox("all"))
+                
+                company_frame.bind("<Configure>", company_configure_scroll_region)
+                company_canvas.bind("<Configure>", company_configure_canvas_size)
+                company_canvas.configure(yscrollcommand=company_v_scrollbar.set, xscrollcommand=company_h_scrollbar.set)
+                
+                # 마우스 휠 스크롤
+                def company_on_mousewheel(e):
+                    company_canvas.yview_scroll(int(-1*(e.delta/120)), "units")
+                def company_on_shift_mousewheel(e):
+                    company_canvas.xview_scroll(int(-1*(e.delta/120)), "units")
+                
+                def company_bind_wheel(event):
+                    company_canvas.bind_all("<MouseWheel>", company_on_mousewheel)
+                    company_canvas.bind_all("<Shift-MouseWheel>", company_on_shift_mousewheel)
+                
+                def company_unbind_wheel(event):
+                    company_canvas.unbind_all("<MouseWheel>")
+                    company_canvas.unbind_all("<Shift-MouseWheel>")
+                
+                company_canvas.bind("<Enter>", company_bind_wheel)
+                company_canvas.bind("<Leave>", company_unbind_wheel)
+                
+                # 배치
+                company_canvas.grid(row=0, column=0, sticky="nsew")
+                company_v_scrollbar.grid(row=0, column=1, sticky="ns")
+                company_h_scrollbar.grid(row=1, column=0, sticky="ew")
+                
+                company_container.grid_rowconfigure(0, weight=1)
+                company_container.grid_columnconfigure(0, weight=1)
+                
                 self.setup_company_tab(company_frame)
                 if self.parent_gui:
                     self.parent_gui.log("  ✓ 회사 정보 탭 완료", is_debug=True)
@@ -373,9 +608,87 @@ class SettingsDialog:
             try:
                 if self.parent_gui:
                     self.parent_gui.log("  - 고급 설정 탭 생성 중...", is_debug=True)
-                advanced_frame = ttk.Frame(notebook, padding="10")
-                notebook.add(advanced_frame, text="⚙️ 고급 설정")
-                self.setup_advanced_tab(advanced_frame)
+                
+                # 스크롤 가능한 프레임 생성
+                advanced_container = ttk.Frame(notebook)
+                notebook.add(advanced_container, text="⚙️ 고급 설정")
+                
+                # Canvas와 Scrollbar
+                canvas = tk.Canvas(advanced_container, highlightthickness=0)
+                self.advanced_canvas = canvas  # 스크롤 영역 업데이트를 위해 참조 저장
+                v_scrollbar = ttk.Scrollbar(advanced_container, orient="vertical", command=canvas.yview)
+                h_scrollbar = ttk.Scrollbar(advanced_container, orient="horizontal", command=canvas.xview)
+                
+                # 스크롤 가능한 프레임
+                self.scrollable_frame = tk.Frame(canvas, padx=10, pady=10)
+                
+                # 프레임을 Canvas에 추가
+                canvas_window = canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+                
+                # Frame 크기가 변경될 때 스크롤 영역과 캔버스 윈도우 크기 동기화
+                def configure_scroll_region(event=None):
+                    # 프레임이 완전히 렌더링될 때까지 대기
+                    self.scrollable_frame.update_idletasks()
+                    # 요구 크기 계산
+                    req_w = self.scrollable_frame.winfo_reqwidth()
+                    req_h = self.scrollable_frame.winfo_reqheight()
+                    # 현재 캔버스 가시 크기 계산
+                    canvas_width = canvas.winfo_width()
+                    canvas_height = canvas.winfo_height()
+                    # 캔버스 윈도우 크기를 현재 캔버스 크기와 요구 크기 중 큰 값으로 설정
+                    canvas.itemconfigure(canvas_window, 
+                                      width=max(canvas_width, req_w), 
+                                      height=max(canvas_height, req_h))
+                    # 스크롤 영역 갱신
+                    canvas.configure(scrollregion=canvas.bbox("all"))
+                
+                # 클래스 메서드로 저장하여 다른 함수에서 접근 가능하도록 함
+                self.advanced_configure_scroll_region = configure_scroll_region
+                
+                # Canvas 크기가 변경될 때 Frame 크기와 동기화
+                def configure_canvas_size(event):
+                    # 프레임이 완전히 렌더링될 때까지 대기
+                    self.scrollable_frame.update_idletasks()
+                    # 요구 크기 재계산
+                    req_w = self.scrollable_frame.winfo_reqwidth()
+                    req_h = self.scrollable_frame.winfo_reqheight()
+                    # 캔버스 윈도우 크기를 이벤트 크기와 요구 크기 중 큰 값으로 설정
+                    canvas.itemconfigure(canvas_window, 
+                                      width=max(event.width, req_w), 
+                                      height=max(event.height, req_h))
+                    # 스크롤 영역 재설정
+                    canvas.configure(scrollregion=canvas.bbox("all"))
+                
+                self.scrollable_frame.bind("<Configure>", configure_scroll_region)
+                canvas.bind("<Configure>", configure_canvas_size)
+                canvas.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
+                
+                # 마우스 휠 스크롤
+                def _on_mousewheel(e):
+                    canvas.yview_scroll(int(-1*(e.delta/120)), "units")
+                def _on_shift_mousewheel(e):
+                    canvas.xview_scroll(int(-1*(e.delta/120)), "units")
+                
+                def bind_wheel(event):
+                    canvas.bind_all("<MouseWheel>", _on_mousewheel)
+                    canvas.bind_all("<Shift-MouseWheel>", _on_shift_mousewheel)
+                
+                def unbind_wheel(event):
+                    canvas.unbind_all("<MouseWheel>")
+                    canvas.unbind_all("<Shift-MouseWheel>")
+                
+                canvas.bind("<Enter>", bind_wheel)
+                canvas.bind("<Leave>", unbind_wheel)
+                
+                # 배치
+                canvas.grid(row=0, column=0, sticky="nsew")
+                v_scrollbar.grid(row=0, column=1, sticky="ns")
+                h_scrollbar.grid(row=1, column=0, sticky="ew")
+                
+                advanced_container.grid_rowconfigure(0, weight=1)
+                advanced_container.grid_columnconfigure(0, weight=1)
+                
+                self.setup_advanced_tab(self.scrollable_frame)
                 if self.parent_gui:
                     self.parent_gui.log("  ✓ 고급 설정 탭 완료", is_debug=True)
             except Exception as e:
@@ -409,54 +722,75 @@ class SettingsDialog:
 
     def setup_email_tab(self, parent):
         """이메일 설정 탭"""
+        # parent에 최소 너비 설정
+        parent.update_idletasks()
+        
         # 입력 필드 프레임
-        input_frame = ttk.Frame(parent)
-        input_frame.pack(fill=tk.X, padx=10, pady=10)
+        input_frame = tk.Frame(parent)
+        input_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+
+        # 이메일 서비스 선택
+        tk.Label(input_frame, text="이메일 서비스:").grid(
+            row=0, column=0, sticky=tk.W, pady=5, padx=(0, 10))
+        
+        self.email_service_var = tk.StringVar()
+        email_service_combo = ttk.Combobox(
+            input_frame, 
+            textvariable=self.email_service_var,
+            values=["Gmail (TLS)", "Gmail (SSL)", "Naver", "Daum", "Outlook", "직접 입력"],
+            state='readonly',
+            width=10
+        )
+        email_service_combo.grid(row=0, column=1, sticky=(tk.W, tk.E), pady=5)
+        email_service_combo.bind('<<ComboboxSelected>>', self.on_email_service_changed)
+        
+        # 현재 설정값으로 초기화
+        current_server = self.config_manager.get('email.smtp_server', '')
+        current_port = self.config_manager.get('email.smtp_port', 587)
+        self.detect_email_service(current_server, current_port)
 
         # SMTP 서버
-        ttk.Label(input_frame, text="SMTP 서버:").grid(
-            row=0, column=0, sticky=tk.W, pady=5, padx=(0, 10))
-        self.smtp_server_var = tk.StringVar(
-            value=self.config_manager.get('email.smtp_server', ''))
-        ttk.Entry(input_frame, textvariable=self.smtp_server_var).grid(
-            row=0, column=1, sticky=(tk.W, tk.E), pady=5)
+        tk.Label(input_frame, text="SMTP 서버:").grid(
+            row=1, column=0, sticky=tk.W, pady=5, padx=(0, 10))
+        self.smtp_server_var = tk.StringVar(value=current_server)
+        self.smtp_server_entry = ttk.Entry(input_frame, textvariable=self.smtp_server_var, state='readonly')
+        self.smtp_server_entry.grid(row=1, column=1, sticky=(tk.W, tk.E), pady=5)
 
         # SMTP 포트
-        ttk.Label(input_frame, text="SMTP 포트:").grid(
-            row=1, column=0, sticky=tk.W, pady=5, padx=(0, 10))
-        self.smtp_port_var = tk.StringVar(
-            value=str(self.config_manager.get('email.smtp_port', 587)))
-        ttk.Entry(input_frame, textvariable=self.smtp_port_var).grid(
-            row=1, column=1, sticky=(tk.W, tk.E), pady=5)
+        tk.Label(input_frame, text="SMTP 포트:").grid(
+            row=2, column=0, sticky=tk.W, pady=5, padx=(0, 10))
+        self.smtp_port_var = tk.StringVar(value=str(current_port))
+        self.smtp_port_entry = ttk.Entry(input_frame, textvariable=self.smtp_port_var, state='readonly')
+        self.smtp_port_entry.grid(row=2, column=1, sticky=(tk.W, tk.E), pady=5)
 
         # 발신 이메일
-        ttk.Label(input_frame, text="발신 이메일:").grid(
-            row=2, column=0, sticky=tk.W, pady=5, padx=(0, 10))
+        tk.Label(input_frame, text="발신 이메일:").grid(
+            row=3, column=0, sticky=tk.W, pady=5, padx=(0, 10))
         self.sender_email_var = tk.StringVar(
             value=self.config_manager.get('email.sender_email', ''))
         ttk.Entry(input_frame, textvariable=self.sender_email_var).grid(
-            row=2, column=1, sticky=(tk.W, tk.E), pady=5)
+            row=3, column=1, sticky=(tk.W, tk.E), pady=5)
 
         # 앱 비밀번호
-        ttk.Label(input_frame, text="앱 비밀번호:").grid(
-            row=3, column=0, sticky=tk.W, pady=5, padx=(0, 10))
+        tk.Label(input_frame, text="앱 비밀번호:").grid(
+            row=4, column=0, sticky=tk.W, pady=5, padx=(0, 10))
         self.sender_password_var = tk.StringVar(
             value=self.config_manager.get('email.sender_password', ''))
         password_entry = ttk.Entry(
             input_frame, textvariable=self.sender_password_var, show='*')
-        password_entry.grid(row=3, column=1, sticky=(tk.W, tk.E), pady=5)
+        password_entry.grid(row=4, column=1, sticky=(tk.W, tk.E), pady=5)
 
         # 비밀번호 표시
         show_pass_var = tk.BooleanVar()
         ttk.Checkbutton(input_frame, text="비밀번호 표시", variable=show_pass_var,
-                       command=lambda: password_entry.config(show='' if show_pass_var.get() else '*')).grid(row=4, column=1, sticky=tk.W)
+                       command=lambda: password_entry.config(show='' if show_pass_var.get() else '*')).grid(row=5, column=1, sticky=tk.W)
 
         # 그리드 컬럼 가중치 설정 (두 번째 컬럼이 늘어나도록)
         input_frame.columnconfigure(1, weight=1)
 
         # 버튼 프레임
-        btn_frame = ttk.Frame(parent)
-        btn_frame.pack(fill=tk.X, padx=10, pady=10)
+        btn_frame = tk.Frame(parent)
+        btn_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
 
         ttk.Button(btn_frame, text="🔌 연결 테스트",
                    command=self.test_connection).pack(side=tk.LEFT, padx=5)
@@ -465,30 +799,42 @@ class SettingsDialog:
 
         # 연결 테스트 결과 표시 레이블
         self.test_result_label = tk.Label(parent, text="", font=(
-            '맑은 고딕', 9, 'bold'), anchor=tk.W, justify=tk.LEFT)
-        self.test_result_label.pack(fill=tk.X, padx=10, pady=(0, 10))
+            '맑은 고딕', 9, 'bold'), anchor=tk.W, justify=tk.LEFT,
+            bg="#f0f0f0", relief="sunken", bd=1)
+        self.test_result_label.grid(row=2, column=0, sticky="nsew", padx=10, pady=(0, 10))
 
         # 도움말 프레임
-        help_frame = ttk.LabelFrame(parent, text="📖 설정 도움말", padding="10")
-        help_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        help_frame = tk.LabelFrame(parent, text="📖 설정 도움말")
+        help_frame.grid(row=3, column=0, sticky="nsew", padx=10, pady=10)
 
         help_text = scrolledtext.ScrolledText(
             help_frame, wrap=tk.WORD, font=('맑은 고딕', 9), cursor="arrow")
         help_text.pack(fill=tk.BOTH, expand=True)
+        help_text.pack_propagate(False)
+        
+
+        # parent 컨테이너의 그리드 설정
+        parent.grid_rowconfigure(0, weight=0)  # input_frame
+        parent.grid_rowconfigure(1, weight=0)  # btn_frame  
+        parent.grid_rowconfigure(2, weight=0)  # test_result_label
+        parent.grid_rowconfigure(3, weight=1, minsize=100)  # help_frame (확장)
+        parent.grid_columnconfigure(0, weight=1, minsize=50)
 
         help_content = """📧 SMTP 설정이란?
 
 SMTP는 "Simple Mail Transfer Protocol"의 줄임말로, 이메일을 자동으로 보내기 위해 반드시 필요한 설정입니다.
 
-🤔 왜 SMTP 설정이 필요한가요?
+🎯 빠른 시작 가이드
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-• 이메일을 자동으로 보내려면 이메일 서버에 접속해야 합니다
-• SMTP는 이메일 서버와 프로그램을 연결해주는 다리 역할을 합니다
-• 이 설정이 없으면 프로그램이 이메일을 보낼 수 없습니다
-• 마치 우체국에 편지를 맡기려면 우체국 주소를 알아야 하는 것과 같습니다
+1. 위에서 "이메일 서비스"를 선택하세요 (Gmail, Naver, Daum, Outlook 등)
+2. 발신 이메일 주소를 입력하세요
+3. 앱 비밀번호를 입력하세요 (아래 서비스별 가이드 참고)
+4. "연결 테스트" 버튼을 눌러 확인하세요
+5. 성공하면 "저장" 버튼을 누르세요!
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- 📋 Gmail 설정 방법 (단계별 안내)
+ 📧 Gmail (지메일) 설정 방법
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ■ 1단계: 2단계 인증 활성화
@@ -502,55 +848,133 @@ SMTP는 "Simple Mail Transfer Protocol"의 줄임말로, 이메일을 자동으�
   → "PDF 이메일 발송 프로그램" 등으로 이름 입력
   → 16자리 비밀번호가 생성됩니다
 
-■ 3단계: 생성된 코드 입력
-  → 위에서 생성된 16자리 코드를 복사
-  → 프로그램의 "앱 비밀번호" 필드에 붙여넣기
-  → 공백은 자동으로 제거되니 걱정하지 마세요
+■ 3단계: 프로그램에 입력
+   • 이메일 서비스: "Gmail (TLS)" 또는 "Gmail (SSL)" 선택
+   • 발신 이메일: your-email@gmail.com
+   • 앱 비밀번호: 위에서 생성한 16자리 코드 입력
+   • "연결 테스트" 버튼으로 확인!
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- ⚙️ 기본 설정값들
+ 📧 Naver (네이버) 설정 방법
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-■ Gmail 기본 설정:
-• SMTP 서버: smtp.gmail.com
-• SMTP 포트: 587
-  • 보안 연결: TLS 사용
+■ 1단계: SMTP 설정 활성화
+   → 네이버 메일(https://mail.naver.com) 접속
+   → 우측 상단 톱니바퀴(⚙️) → "환경설정" 클릭
+   → 좌측 메뉴에서 "POP3/IMAP 설정" 탭 선택
+   → 상단의 "IMAP/SMTP 설정" 탭으로 이동
+   → "IMAP/SMTP 사용" → "사용함" 선택
+   → 하단의 "저장" 버튼 클릭
 
-■ 다른 이메일 서비스 설정:
+■ 2단계: 2단계 인증 설정 (필수)
+   → 네이버 보안설정(https://nid.naver.com/user2/help/myInfoV2) 접속
+   → "2단계 인증" 설정 활성화
+   → SMS 또는 OTP 앱으로 인증 설정 완료
 
-  📧 Naver (네이버):
-    • SMTP 서버: smtp.naver.com
-    • SMTP 포트: 587
-    • 보안 연결: TLS 사용
+■ 3단계: 프로그램에 입력
+   • 이메일 서비스: "Naver" 선택
+   • 발신 이메일: your-id@naver.com
+   • 앱 비밀번호: 네이버 계정 비밀번호 입력
+   • "연결 테스트" 버튼으로 확인!
 
-  📧 Daum (다음):
-    • SMTP 서버: smtp.daum.net
-    • SMTP 포트: 465
-    • 보안 연결: SSL 사용
-
-  📧 Outlook (아웃룩):
-    • SMTP 서버: smtp-mail.outlook.com
-    • SMTP 포트: 587
-    • 보안 연결: TLS 사용
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- 💡 중요한 팁들
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-• 일반 비밀번호가 아닌 "앱 비밀번호"를 사용해야 합니다
-• 앱 비밀번호는 16자리 영문+숫자 조합입니다
-• 설정 후 "연결 테스트" 버튼으로 확인해 보세요
-• 연결이 안 되면 이메일 주소와 앱 비밀번호를 다시 확인해 주세요
-• 다른 이메일 서비스를 사용할 때는 해당 서비스의 SMTP 설정을 확인하세요
+💡 팁: 네이버는 일반 계정 비밀번호를 사용하며, 2단계 인증 설정이 필수입니다!
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- ⚠️ 주의사항
+ 📧 Daum (다음/한메일) 설정 방법
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+■ 1단계: SMTP 설정 활성화
+   → 다음 메일(https://mail.daum.net) 접속
+   → 우측 상단 "설정" 클릭
+   → 좌측 메뉴에서 "IMAP/POP3" 탭 선택
+   → "IMAP" 탭으로 이동
+   → "IMAP / SMTP 사용" 토글을 켜기
+   → 2단계 인증 안내 팝업이 표시됩니다
+
+■ 2단계: 2단계 인증 설정 (필수)
+   → 팝업에서 "앱 비밀번호 확인하기" 클릭 (또는 아래 링크)
+   → 카카오 계정 보안(https://accounts.kakao.com/weblogin/account/security) 접속
+   → 좌측 메뉴에서 "계정 보안" → "2단계 인증" 클릭
+   → 2단계 인증 활성화 (SMS 또는 OTP)
+
+■ 3단계: 앱 비밀번호 생성
+   → 카카오 계정 보안 페이지에서 "비밀번호 변경" 클릭
+   → 하단의 "앱 비밀번호" 메뉴 선택
+   → "앱 이름"에 "PDF발송프로그램" 등 입력
+   → "생성" 버튼 클릭
+   → 생성된 앱 비밀번호 복사 (한 번만 표시됨!)
+
+■ 4단계: 프로그램에 입력
+   • 이메일 서비스: "Daum" 선택
+   • 발신 이메일: your-id@hanmail.net 또는 your-id@daum.net
+   • 앱 비밀번호: 위에서 생성한 앱 비밀번호 입력
+   • "연결 테스트" 버튼으로 확인!
+
+💡 팁: 다음은 반드시 앱 비밀번호를 사용해야 하며, 2단계 인증 설정이 필수입니다!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ 📧 Outlook (아웃룩/Hotmail) 설정 방법
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+■ 1단계: 2단계 인증 활성화 (선택사항이지만 권장)
+   → https://account.microsoft.com/security
+   → "2단계 인증" 설정
+
+■ 2단계: 앱 비밀번호 생성 (2단계 인증 활성화 시)
+   → https://account.microsoft.com/security
+   → "앱 암호" 클릭
+   → 새 앱 암호 생성
+   → 생성된 비밀번호 복사
+
+■ 3단계: 프로그램에 입력
+   • 이메일 서비스: "Outlook" 선택
+   • 발신 이메일: your-email@outlook.com 또는 @hotmail.com
+   • 앱 비밀번호: 앱 암호 (또는 계정 비밀번호)
+   • "연결 테스트" 버튼으로 확인!
+
+💡 팁: 2단계 인증을 사용하지 않으면 일반 계정 비밀번호를 사용하세요!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ ⚙️ 각 서비스별 설정값 요약
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Gmail (TLS):    smtp.gmail.com:587    (앱 비밀번호 필수, 2단계 인증 필수)
+  Gmail (SSL):    smtp.gmail.com:465    (앱 비밀번호 필수, 2단계 인증 필수)
+  Naver:          smtp.naver.com:587    (계정 비밀번호, 2단계 인증 필수)
+  Daum:           smtp.daum.net:465     (앱 비밀번호 필수, 2단계 인증 필수)
+  Outlook:        smtp-mail.outlook.com:587  (앱 암호 권장, 2단계 인증 권장)
+
+💡 이메일 서비스를 선택하면 서버와 포트가 자동으로 설정됩니다!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ 🔧 문제 해결
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+❌ "인증 실패" 오류가 나요
+   → 이메일 주소를 다시 확인하세요
+   → Gmail/Daum: 반드시 앱 비밀번호를 사용해야 합니다
+   → Naver: 일반 계정 비밀번호를 사용하세요
+   → 모든 서비스: 2단계 인증이 설정되어 있는지 확인하세요
+   → Naver/Daum: SMTP 사용 설정이 활성화되어 있는지 확인하세요
+
+❌ "연결 시간 초과" 오류가 나요
+   → 인터넷 연결을 확인하세요
+   → 방화벽에서 프로그램을 허용했는지 확인하세요
+   → 이메일 서비스 선택이 올바른지 확인하세요
+
+❌ "서버를 찾을 수 없음" 오류가 나요
+   → 이메일 서비스를 다시 선택해 보세요
+   → "직접 입력"을 선택한 경우 서버 주소를 확인하세요
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ ⚠️ 보안 주의사항
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 • 앱 비밀번호는 한 번만 표시되니 반드시 복사해서 저장하세요
 • 앱 비밀번호를 잃어버리면 새로 생성해야 합니다
-• 2단계 인증이 활성화되어 있어야 앱 비밀번호를 만들 수 있습니다
-• 설정을 변경한 후에는 반드시 "저장" 버튼을 눌러주세요"""
+• 비밀번호는 안전한 곳에 보관하세요
+• 설정을 변경한 후에는 반드시 "저장" 버튼을 눌러주세요
+• 이 프로그램은 비밀번호를 암호화하여 로컬에만 저장합니다"""
 
         help_text.insert('1.0', help_content)
 
@@ -576,11 +1000,11 @@ SMTP는 "Simple Mail Transfer Protocol"의 줄임말로, 이메일을 자동으�
         """회사 정보 탭"""
         # 설명
         ttk.Label(parent, text="회사별 이메일 주소와 사용할 양식을 설정하세요.",
-                 font=('맑은 고딕', 10, 'bold')).pack(pady=10)
+                 font=('맑은 고딕', 10, 'bold')).grid(row=0, column=0, pady=10)
 
         # 회사 리스트
         list_frame = ttk.Frame(parent)
-        list_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+        list_frame.grid(row=1, column=0, sticky="nsew", pady=10)
 
         scrollbar = ttk.Scrollbar(list_frame)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
@@ -595,7 +1019,7 @@ SMTP는 "Simple Mail Transfer Protocol"의 줄임말로, 이메일을 자동으�
 
         # 버튼
         btn_frame = ttk.Frame(parent)
-        btn_frame.pack(fill=tk.X)
+        btn_frame.grid(row=2, column=0, sticky="nsew")
 
         ttk.Button(btn_frame, text="추가", command=self.add_company).pack(
             side=tk.LEFT, padx=5)
@@ -607,12 +1031,18 @@ SMTP는 "Simple Mail Transfer Protocol"의 줄임말로, 이메일을 자동으�
             side=tk.LEFT, padx=5)
         ttk.Button(btn_frame, text="🔄 회사 정보 초기화",
                    command=self.reset_company_info).pack(side=tk.RIGHT, padx=5)
+        
+        # parent 컨테이너의 그리드 설정
+        parent.grid_rowconfigure(0, weight=0)  # 설명 (고정)
+        parent.grid_rowconfigure(1, weight=1)  # list_frame (확장)
+        parent.grid_rowconfigure(2, weight=0)  # btn_frame (고정)
+        parent.grid_columnconfigure(0, weight=1)
 
     def setup_template_tab(self, parent):
         """이메일 양식 탭"""
         # 양식 리스트
-        list_frame = ttk.Frame(parent)
-        list_frame.pack(fill=tk.BOTH, expand=True, pady=10, padx=10)
+        list_frame = tk.Frame(parent)
+        list_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
 
         scrollbar = ttk.Scrollbar(list_frame)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
@@ -628,8 +1058,8 @@ SMTP는 "Simple Mail Transfer Protocol"의 줄임말로, 이메일을 자동으�
         self.refresh_template_list()
 
         # 버튼
-        btn_frame = ttk.Frame(parent)
-        btn_frame.pack(fill=tk.X, padx=10, pady=5)
+        btn_frame = tk.Frame(parent)
+        btn_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=5)
 
         ttk.Button(btn_frame, text="➕ 추가", command=self.add_template).pack(
             side=tk.LEFT, padx=5)
@@ -645,8 +1075,8 @@ SMTP는 "Simple Mail Transfer Protocol"의 줄임말로, 이메일을 자동으�
             side=tk.RIGHT, padx=5)
 
         # 미리보기
-        preview_frame = ttk.LabelFrame(parent, text="미리보기", padding="10")
-        preview_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        preview_frame = tk.LabelFrame(parent, text="미리보기")
+        preview_frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=5)
 
         ttk.Label(preview_frame, text="제목:").pack(anchor=tk.W)
         self.preview_subject = tk.Text(
@@ -658,10 +1088,113 @@ SMTP는 "Simple Mail Transfer Protocol"의 줄임말로, 이메일을 자동으�
             preview_frame, height=6, wrap=tk.WORD, state='disabled')
         self.preview_body.pack(fill=tk.BOTH, expand=True, pady=2)
 
-        # 변수 안내
-        info_text = "사용 가능한 변수: {회사명}, {파일명}, {날짜}, {시간}"
-        ttk.Label(parent, text=info_text, foreground='gray').pack(
-            anchor=tk.W, pady=5, padx=10)
+        # 변수 안내 (토글 가능)
+        self.setup_variable_info(parent, row=3)
+        
+        # parent 컨테이너의 그리드 설정
+        parent.grid_rowconfigure(0, weight=1)  # list_frame (확장)
+        parent.grid_rowconfigure(1, weight=0)  # btn_frame (고정)
+        parent.grid_rowconfigure(2, weight=1)  # preview_frame (확장)
+        parent.grid_rowconfigure(3, weight=0)  # variable_info (고정)
+        parent.grid_columnconfigure(0, weight=1)
+
+    def setup_variable_info(self, parent, row):
+        """변수 안내 설정"""
+        # 변수 확인 프레임 (외부 컨테이너)
+        var_check_frame = ttk.LabelFrame(parent, text="사용 가능한 변수")
+        var_check_frame.grid(row=row, column=0, sticky="nsew", padx=10, pady=5)
+        
+        # 프레임 내부 그리드 설정 (좌우 배치)
+        var_check_frame.grid_columnconfigure(0, weight=0)  # 버튼 (고정 크기)
+        var_check_frame.grid_columnconfigure(1, weight=1)  # 사용 가능한 변수 프레임 (확장 가능)
+        var_check_frame.grid_rowconfigure(0, weight=1)
+        
+        # 모든 변수 확인하기 버튼 (왼쪽)
+        check_vars_btn = ttk.Button(var_check_frame, text="모든 변수\n확인하기", 
+                                  command=self.show_all_variables)
+        check_vars_btn.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+
+        # 사용 가능한 변수 프레임 (오른쪽)
+        var_frame = ttk.LabelFrame(var_check_frame, text="기본 제공 변수")
+        var_frame.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
+        
+        # 변수 목록 텍스트 (부모 크기에 맞춰 자동 줄바꿈)
+        var_content = "{회사명}, {파일명}, {날짜}, {시간}, {년}, {월}, {일}, {요일}, {요일한글}, {시}, {분}, {초}, {시간12}, {오전오후}"
+        info_text = tk.Label(var_frame, text=var_content, 
+                           font=('맑은 고딕', 9), fg='#666666',
+                           anchor='nw', justify='left')
+        info_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # 창/부모 폭 변화에 맞춰 wraplength(픽셀 단위) 갱신
+        def sync_wrap(event):
+            # 좌우 패딩(여기서는 5+5)을 고려해서 약간 빼줌
+            wrap = max(0, event.width - 10)
+            info_text.configure(wraplength=wrap)
+        info_text.bind("<Configure>", sync_wrap)
+        
+        # parent 그리드 설정 업데이트
+        parent.grid_rowconfigure(row, weight=0)
+
+    def show_all_variables(self):
+        """모든 변수 확인 창 표시"""
+        # 새 창 생성
+        var_window = tk.Toplevel(self.dialog)
+        var_window.title("모든 변수 목록")
+        var_window.resizable(True, True)
+        
+        # 중앙 위치 설정
+        center_window(var_window, self.dialog, 500, 400)
+        var_window.grab_set()
+        
+        # 스크롤 가능한 텍스트 위젯
+        text_frame = tk.Frame(var_window)
+        text_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        text_widget = tk.Text(text_frame, font=('맑은 고딕', 10), fg='#333333',
+                             wrap=tk.WORD, state=tk.DISABLED)
+        scrollbar = ttk.Scrollbar(text_frame, orient=tk.VERTICAL, command=text_widget.yview)
+        text_widget.configure(yscrollcommand=scrollbar.set)
+        
+        text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # 변수 목록 내용
+        content = """📋 기본 제공 변수:
+
+{회사명} - 회사명
+{파일명} - PDF 파일명
+{날짜} - 현재 날짜 (YYYY-MM-DD)
+{시간} - 현재 시간 (HH:MM:SS)
+{년} - 년도 (4자리)
+{월} - 월 (1-12)
+{일} - 일 (1-31)
+{요일} - 요일 (영문)
+{요일한글} - 요일 (한글)
+{시} - 시 (0-23)
+{분} - 분 (0-59)
+{초} - 초 (0-59)
+{시간12} - 12시간 형식 시간
+{오전오후} - 오전/오후
+
+🔧 커스텀 변수:
+"""
+        
+        # 커스텀 변수 추가
+        custom_vars = self.config_manager.get('custom_variables', {})
+        if custom_vars:
+            for var_name, var_value in custom_vars.items():
+                content += f"{{{var_name}}} - {var_value}\n"
+        else:
+            content += "등록된 커스텀 변수가 없습니다.\n'🔧 커스텀 변수' 버튼을 눌러 추가하세요."
+        
+        # 텍스트 위젯에 내용 삽입
+        text_widget.config(state=tk.NORMAL)
+        text_widget.insert(tk.END, content)
+        text_widget.config(state=tk.DISABLED)
+        
+        # 닫기 버튼
+        close_btn = ttk.Button(var_window, text="닫기", command=var_window.destroy)
+        close_btn.pack(pady=10)
 
     def setup_advanced_tab(self, parent):
         """고급 설정 탭"""
@@ -739,6 +1272,53 @@ SMTP는 "Simple Mail Transfer Protocol"의 줄임말로, 이메일을 자동으�
         ttk.Label(parent, text="* 디버그 모드 활성화 시 상세한 UI 구성 로그가 표시됩니다",
                  foreground='gray').pack(anchor=tk.W, pady=2, padx=10)
 
+        # 구분선
+        ttk.Separator(parent, orient='horizontal').pack(
+            fill=tk.X, pady=20, padx=10)
+
+        # 글자 크기 설정 (최하단)
+        ttk.Label(parent, text="🔤 프로그램 글자 크기:", font=('맑은 고딕', 9, 'bold')).pack(
+            anchor=tk.W, pady=(5, 5), padx=10)
+        
+        font_size_frame = ttk.Frame(parent)
+        font_size_frame.pack(fill=tk.X, pady=5, padx=10)
+        
+        ttk.Label(font_size_frame, text="크기:").pack(side=tk.LEFT, padx=(0, 10))
+        
+        self.font_size_var = tk.StringVar(
+            value=str(self.config_manager.get('ui.font_size', 9)))
+        
+        font_size_spinbox = ttk.Spinbox(
+            font_size_frame, 
+            from_=8, 
+            to=16, 
+            textvariable=self.font_size_var,
+            width=5,
+            command=self.update_font_preview
+        )
+        font_size_spinbox.pack(side=tk.LEFT)
+        font_size_spinbox.bind('<KeyRelease>', lambda e: self.update_font_preview())
+        
+        ttk.Label(font_size_frame, text="pt (8~16pt, 기본값: 9pt)",
+                 foreground='gray').pack(side=tk.LEFT, padx=(10, 0))
+        
+        # 미리보기 프레임
+        preview_frame = ttk.LabelFrame(parent, text="📋 미리보기", padding="10")
+        preview_frame.pack(fill=tk.X, pady=10, padx=10)
+        
+        self.font_preview_label = tk.Label(
+            preview_frame, 
+            text="이 텍스트로 크기를 확인해 보세요 (The quick brown fox)",
+            font=('맑은 고딕', int(self.font_size_var.get())),
+            fg='#333333',
+            wraplength=400,  # 텍스트 줄바꿈 설정
+            justify=tk.CENTER
+        )
+        self.font_preview_label.pack(pady=5)
+        
+        ttk.Label(parent, text="* 글자 크기 변경 후 프로그램을 재시작하면 적용됩니다",
+                 foreground='orange', font=('맑은 고딕', 8)).pack(anchor=tk.W, pady=2, padx=10)
+
         # 버튼 프레임
         btn_frame = ttk.Frame(parent)
         btn_frame.pack(fill=tk.X, pady=10, padx=10)
@@ -747,6 +1327,27 @@ SMTP는 "Simple Mail Transfer Protocol"의 줄임말로, 이메일을 자동으�
                    command=self.show_advanced_help).pack(side=tk.LEFT)
         ttk.Button(btn_frame, text="🔄 고급 설정 초기화",
                    command=self.reset_advanced_settings).pack(side=tk.RIGHT)
+        
+                    
+
+    def update_font_preview(self):
+        """글자 크기 미리보기 업데이트"""
+        try:
+            font_size = int(self.font_size_var.get())
+            if 8 <= font_size <= 16:
+                self.font_preview_label.config(font=('맑은 고딕', font_size))
+                # 스크롤 영역 강제 업데이트
+                self.dialog.update_idletasks()
+                # 고급 설정 탭의 스크롤 영역 업데이트
+                if hasattr(self, 'advanced_canvas'):
+                    # scrollable_frame 크기 강제 갱신
+                    self.advanced_canvas.update_idletasks()
+                    self.advanced_canvas.configure(scrollregion=self.advanced_canvas.bbox("all"))
+                # 동적 크기 변경 후 레이아웃 계산이 반영되도록 콜백 호출
+                if hasattr(self, 'advanced_configure_scroll_region'):
+                    self.scrollable_frame.after_idle(self.advanced_configure_scroll_region)
+        except ValueError:
+            pass  # 잘못된 값이면 무시
 
     def refresh_company_list(self):
         """회사 목록 새로고침"""
@@ -901,6 +1502,57 @@ SMTP는 "Simple Mail Transfer Protocol"의 줄임말로, 이메일을 자동으�
         """양식 로드 (하위 호환성 유지)"""
         pass
 
+    def detect_email_service(self, server, port):
+        """현재 서버/포트로 이메일 서비스 감지"""
+        port = int(port) if isinstance(port, str) else port
+        
+        if server == 'smtp.gmail.com' and port == 587:
+            self.email_service_var.set("Gmail (TLS)")
+        elif server == 'smtp.gmail.com' and port == 465:
+            self.email_service_var.set("Gmail (SSL)")
+        elif server == 'smtp.naver.com' and port == 587:
+            self.email_service_var.set("Naver")
+        elif server == 'smtp.daum.net' and port == 465:
+            self.email_service_var.set("Daum")
+        elif server == 'smtp-mail.outlook.com' and port == 587:
+            self.email_service_var.set("Outlook")
+        else:
+            self.email_service_var.set("직접 입력")
+            # 직접 입력 모드로 전환
+            self.smtp_server_entry.config(state='normal')
+            self.smtp_port_entry.config(state='normal')
+
+    def on_email_service_changed(self, event=None):
+        """이메일 서비스 선택 변경 시 처리"""
+        service = self.email_service_var.get()
+        
+        # 서비스별 설정
+        email_services = {
+            "Gmail (TLS)": ("smtp.gmail.com", "587"),
+            "Gmail (SSL)": ("smtp.gmail.com", "465"),
+            "Naver": ("smtp.naver.com", "587"),
+            "Daum": ("smtp.daum.net", "465"),
+            "Outlook": ("smtp-mail.outlook.com", "587"),
+        }
+        
+        if service == "직접 입력":
+            # 입력 가능하게 변경
+            self.smtp_server_entry.config(state='normal')
+            self.smtp_port_entry.config(state='normal')
+            # 기존 값 유지하거나 비우기
+            if self.smtp_server_var.get() in [s[0] for s in email_services.values()]:
+                self.smtp_server_var.set('')
+                self.smtp_port_var.set('')
+        else:
+            # 읽기 전용으로 변경
+            self.smtp_server_entry.config(state='readonly')
+            self.smtp_port_entry.config(state='readonly')
+            # 선택한 서비스의 설정 적용
+            if service in email_services:
+                server, port = email_services[service]
+                self.smtp_server_var.set(server)
+                self.smtp_port_var.set(port)
+
     def test_connection(self):
         """연결 테스트"""
         # 이전 결과 초기화
@@ -929,8 +1581,15 @@ SMTP는 "Simple Mail Transfer Protocol"의 줄임말로, 이메일을 자동으�
             return
 
         try:
-            server = smtplib.SMTP(smtp_server, smtp_port, timeout=10)
+            # 포트에 따라 SSL/TLS 선택
+            if smtp_port == 465:
+                # SSL 연결
+                server = smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=10)
+            else:
+                # TLS 연결
+                server = smtplib.SMTP(smtp_server, smtp_port, timeout=10)
             server.starttls()
+            
             server.login(sender_email, sender_password)
             server.quit()
 
@@ -995,8 +1654,13 @@ SMTP는 "Simple Mail Transfer Protocol"의 줄임말로, 이메일을 자동으�
                 self.auto_send_var.get())
             self.config_manager.config['email_send_timeout'] = int(
                 self.email_send_timeout_var.get())
-            self.config_manager.config['debug_mode'] = self.debug_mode_var.get(
-            )
+            self.config_manager.config['debug_mode'] = self.debug_mode_var.get()
+            
+            # 글자 크기 설정 저장
+            old_font_size = self.config_manager.get('ui.font_size', 9)
+            new_font_size = int(self.font_size_var.get())
+            self.config_manager.set('ui.font_size', new_font_size)
+            font_size_changed = (old_font_size != new_font_size)
 
             # 회사 정보와 이메일 양식은 이미 config_manager에 반영됨 (실시간 저장)
             # 모든 설정을 한번에 파일로 저장
@@ -1024,7 +1688,17 @@ SMTP는 "Simple Mail Transfer Protocol"의 줄임말로, 이메일을 자동으�
                 self.parent_gui.check_and_connect_email()
 
             self.dialog.focus_force()
-            messagebox.showinfo("저장 완료", "설정이 저장되었습니다!", parent=self.dialog)
+            
+            # 글자 크기 변경 시 재시작 안내
+            if font_size_changed:
+                messagebox.showinfo(
+                    "저장 완료", 
+                    "설정이 저장되었습니다!\n\n글자 크기 변경사항을 적용하려면 프로그램을 재시작해 주세요.",
+                    parent=self.dialog
+                )
+            else:
+                messagebox.showinfo("저장 완료", "설정이 저장되었습니다!", parent=self.dialog)
+            
             self.result = True
             self.dialog.destroy()
 
@@ -1189,27 +1863,8 @@ SMTP는 "Simple Mail Transfer Protocol"의 줄임말로, 이메일을 자동으�
         help_window.geometry("700x600")
         help_window.transient(self.dialog)
 
-        # 부모 창 중앙에 위치
-        help_window.update_idletasks()
-        self.dialog.update_idletasks()
-
-        parent_x = self.dialog.winfo_x()
-        parent_y = self.dialog.winfo_y()
-        parent_width = self.dialog.winfo_width()
-        parent_height = self.dialog.winfo_height()
-
-        dialog_width = 700
-        dialog_height = 600
-
-        x = parent_x + (parent_width - dialog_width) // 2
-        y = parent_y + (parent_height - dialog_height) // 2
-
-        if x < 0:
-            x = 0
-        if y < 0:
-            y = 0
-
-        help_window.geometry(f"700x600+{x}+{y}")
+        # 중앙 위치 설정
+        center_window(help_window, self.dialog, 700, 600)
 
         text_widget = scrolledtext.ScrolledText(
             help_window, wrap=tk.WORD, padx=10, pady=10)
@@ -1289,27 +1944,8 @@ SMTP는 "Simple Mail Transfer Protocol"의 줄임말로, 이메일을 자동으�
         help_window.geometry("700x600")
         help_window.transient(self.dialog)
 
-        # 부모 창 중앙에 위치
-        help_window.update_idletasks()
-        self.dialog.update_idletasks()
-
-        parent_x = self.dialog.winfo_x()
-        parent_y = self.dialog.winfo_y()
-        parent_width = self.dialog.winfo_width()
-        parent_height = self.dialog.winfo_height()
-
-        dialog_width = 700
-        dialog_height = 600
-
-        x = parent_x + (parent_width - dialog_width) // 2
-        y = parent_y + (parent_height - dialog_height) // 2
-
-        if x < 0:
-            x = 0
-        if y < 0:
-            y = 0
-
-        help_window.geometry(f"700x600+{x}+{y}")
+        # 중앙 위치 설정
+        center_window(help_window, self.dialog, 700, 600)
 
         text_widget = scrolledtext.ScrolledText(
             help_window, wrap=tk.WORD, padx=10, pady=10)
@@ -1495,27 +2131,8 @@ SMTP는 "Simple Mail Transfer Protocol"의 줄임말로, 이메일을 자동으�
         help_window.geometry("700x600")
         help_window.transient(self.dialog)
 
-        # 부모 창 중앙에 위치
-        help_window.update_idletasks()
-        self.dialog.update_idletasks()
-
-        parent_x = self.dialog.winfo_x()
-        parent_y = self.dialog.winfo_y()
-        parent_width = self.dialog.winfo_width()
-        parent_height = self.dialog.winfo_height()
-
-        dialog_width = 700
-        dialog_height = 600
-
-        x = parent_x + (parent_width - dialog_width) // 2
-        y = parent_y + (parent_height - dialog_height) // 2
-
-        if x < 0:
-            x = 0
-        if y < 0:
-            y = 0
-
-        help_window.geometry(f"700x600+{x}+{y}")
+        # 중앙 위치 설정
+        center_window(help_window, self.dialog, 700, 600)
 
         text_widget = scrolledtext.ScrolledText(
             help_window, wrap=tk.WORD, padx=10, pady=10)
@@ -1641,23 +2258,7 @@ class CustomVariableManager:
         self.dialog.update_idletasks()
         parent.update_idletasks()
 
-        parent_x = parent.winfo_x()
-        parent_y = parent.winfo_y()
-        parent_width = parent.winfo_width()
-        parent_height = parent.winfo_height()
-
-        dialog_width = self.dialog.winfo_width()
-        dialog_height = self.dialog.winfo_height()
-
-        x = parent_x + (parent_width - dialog_width) // 2
-        y = parent_y + (parent_height - dialog_height) // 2
-
-        if x < 0:
-            x = 0
-        if y < 0:
-            y = 0
-
-        self.dialog.geometry(f"+{x}+{y}")
+        center_window(self.dialog, parent)
 
         self.setup_ui()
 
@@ -1790,27 +2391,8 @@ class CustomVariableManager:
         help_window.geometry("600x500")
         help_window.transient(self.dialog)
 
-        # 부모 창 중앙에 위치
-        help_window.update_idletasks()
-        self.dialog.update_idletasks()
-
-        parent_x = self.dialog.winfo_x()
-        parent_y = self.dialog.winfo_y()
-        parent_width = self.dialog.winfo_width()
-        parent_height = self.dialog.winfo_height()
-
-        dialog_width = 600
-        dialog_height = 500
-
-        x = parent_x + (parent_width - dialog_width) // 2
-        y = parent_y + (parent_height - dialog_height) // 2
-
-        if x < 0:
-            x = 0
-        if y < 0:
-            y = 0
-
-        help_window.geometry(f"600x500+{x}+{y}")
+        # 중앙 위치 설정
+        center_window(help_window, self.dialog, 600, 500)
 
         text_widget = scrolledtext.ScrolledText(
             help_window, wrap=tk.WORD, padx=10, pady=10)
@@ -1916,27 +2498,8 @@ class CustomVariableDialog:
         self.dialog.transient(parent)
         self.dialog.grab_set()
 
-        # 부모 창 중앙에 위치 (setup_ui 전에 위치 설정)
-        self.dialog.update_idletasks()
-        parent.update_idletasks()
-
-        parent_x = parent.winfo_x()
-        parent_y = parent.winfo_y()
-        parent_width = parent.winfo_width()
-        parent_height = parent.winfo_height()
-
-        dialog_width = self.dialog.winfo_width()
-        dialog_height = self.dialog.winfo_height()
-
-        x = parent_x + (parent_width - dialog_width) // 2
-        y = parent_y + (parent_height - dialog_height) // 2
-
-        if x < 0:
-            x = 0
-        if y < 0:
-            y = 0
-
-        self.dialog.geometry(f"+{x}+{y}")
+        # 중앙 위치 설정
+        center_window(self.dialog, parent)
 
         self.setup_ui()
 
@@ -2010,6 +2573,12 @@ class CustomVariableDialog:
 
         try:
             custom_vars = self.config_manager.get('custom_variables', {})
+            
+            # 중복 체크 (새로 추가할 때만)
+            if self.var_name is None and var_name in custom_vars:
+                messagebox.showwarning("중복 오류", f"'{var_name}' 변수가 이미 존재합니다.\n수정하려면 기존 변수를 선택하고 '수정' 버튼을 사용하세요.", parent=self.dialog)
+                return
+            
             custom_vars[var_name] = var_value
             self.config_manager.set('custom_variables', custom_vars)
 
@@ -2034,31 +2603,11 @@ class CompanyDialog:
 
         self.dialog = tk.Toplevel(parent)
         self.dialog.title("회사 정보 추가" if not company_name else "회사 정보 수정")
-        self.dialog.geometry("400x200")
         self.dialog.transient(parent)
         self.dialog.grab_set()
 
-        # 부모 창 중앙에 위치 (setup_ui 전에 위치 설정)
-        self.dialog.update_idletasks()
-        parent.update_idletasks()
-
-        parent_x = parent.winfo_x()
-        parent_y = parent.winfo_y()
-        parent_width = parent.winfo_width()
-        parent_height = parent.winfo_height()
-
-        dialog_width = self.dialog.winfo_width()
-        dialog_height = self.dialog.winfo_height()
-
-        x = parent_x + (parent_width - dialog_width) // 2
-        y = parent_y + (parent_height - dialog_height) // 2
-
-        if x < 0:
-            x = 0
-        if y < 0:
-            y = 0
-
-        self.dialog.geometry(f"+{x}+{y}")
+        # 중앙 위치 설정
+        center_window(self.dialog, parent)
 
         self.setup_ui()
 
@@ -2151,6 +2700,10 @@ class CompanyDialog:
             if self.parent_gui:
                 self.parent_gui.log("  ✓ 버튼 완료", is_debug=True)
                 self.parent_gui.log("✅ 회사 정보 대화상자 UI 구성 완료!", is_debug=True)
+            
+            # 창 크기를 내용에 맞춰 자동 조정
+            self.dialog.update_idletasks()
+            self.dialog.geometry("")
 
         except Exception as e:
             error_msg = f"❌ 회사 정보 대화상자 UI 구성 중 오류 발생: {e}"
@@ -2199,33 +2752,13 @@ class TemplateDialog:
 
         self.dialog = tk.Toplevel(parent)
         self.dialog.title("양식 추가" if not template_name else "양식 수정")
-        self.dialog.geometry("550x450")
         self.dialog.transient(parent)
         self.dialog.grab_set()
 
-        # 부모 창 중앙에 위치 (setup_ui 전에 위치 설정)
-        self.dialog.update_idletasks()
-        parent.update_idletasks()
-
-        parent_x = parent.winfo_x()
-        parent_y = parent.winfo_y()
-        parent_width = parent.winfo_width()
-        parent_height = parent.winfo_height()
-
-        dialog_width = self.dialog.winfo_width()
-        dialog_height = self.dialog.winfo_height()
-
-        x = parent_x + (parent_width - dialog_width) // 2
-        y = parent_y + (parent_height - dialog_height) // 2
-
-        if x < 0:
-            x = 0
-        if y < 0:
-            y = 0
-
-        self.dialog.geometry(f"+{x}+{y}")
-
         self.setup_ui()
+        
+        # 중앙 위치 설정
+        center_window(self.dialog, parent, 550, 450)
 
     def setup_ui(self):
         """UI 구성"""
@@ -2322,6 +2855,10 @@ class TemplateDialog:
             if self.parent_gui:
                 self.parent_gui.log("  ✓ 버튼 완료")
                 self.parent_gui.log("✅ 이메일 양식 대화상자 UI 구성 완료!")
+            
+            # 창 크기를 내용에 맞춰 자동 조정
+            self.dialog.update_idletasks()
+            self.dialog.geometry("")
 
         except Exception as e:
             error_msg = f"❌ 이메일 양식 대화상자 UI 구성 중 오류 발생: {e}"
@@ -2396,6 +2933,9 @@ class PDFEmailSenderGUI:
             self.current_folder = None
 
             self.buffer_log("🔧 프로그램 초기화 시작", is_debug=True)
+            
+            # 글자 크기 설정 적용
+            self.apply_font_size()
 
             self.setup_ui()
 
@@ -2423,6 +2963,42 @@ class PDFEmailSenderGUI:
 
             messagebox.showerror(
                 "초기화 오류", f"프로그램 시작 중 오류가 발생했습니다.\n\n{str(e)}", parent=self.root)
+
+    def apply_font_size(self):
+        """설정된 글자 크기를 전체 프로그램에 적용"""
+        try:
+            font_size = self.config_manager.get('ui.font_size', 9)
+            
+            # tkinter 기본 폰트 설정
+            import tkinter.font as tkFont
+            
+            # 기본 폰트 패밀리
+            default_font = tkFont.nametofont("TkDefaultFont")
+            default_font.configure(size=font_size, family='맑은 고딕')
+            
+            text_font = tkFont.nametofont("TkTextFont")
+            text_font.configure(size=font_size, family='맑은 고딕')
+            
+            fixed_font = tkFont.nametofont("TkFixedFont")
+            fixed_font.configure(size=font_size)
+            
+            # 추가 폰트 설정
+            for font_name in ["TkMenuFont", "TkCaptionFont", "TkSmallCaptionFont", "TkIconFont", "TkTooltipFont"]:
+                try:
+                    font = tkFont.nametofont(font_name)
+                    font.configure(size=font_size, family='맑은 고딕')
+                except:
+                    pass
+            
+            # ttk 스타일 설정 - Entry 위젯 폰트 적용
+            style = ttk.Style()
+            style.configure('TEntry', font=('맑은 고딕', font_size))
+            style.configure('TSpinbox', font=('맑은 고딕', font_size))
+            style.configure('TCombobox', font=('맑은 고딕', font_size))
+            
+            self.buffer_log(f"✓ 글자 크기 적용: {font_size}pt", is_debug=True)
+        except Exception as e:
+            self.buffer_log(f"⚠ 글자 크기 적용 실패: {e}", is_debug=True)
 
     def buffer_log(self, message, is_debug=False):
         """초기화 중 로그를 버퍼에 저장"""
@@ -2687,27 +3263,8 @@ class PDFEmailSenderGUI:
         dialog.transient(self.root)
         dialog.grab_set()
 
-        # 부모 창 중앙에 위치
-        dialog.update_idletasks()
-        self.root.update_idletasks()
-
-        parent_x = self.root.winfo_x()
-        parent_y = self.root.winfo_y()
-        parent_width = self.root.winfo_width()
-        parent_height = self.root.winfo_height()
-
-        dialog_width = 400
-        dialog_height = 200
-
-        x = parent_x + (parent_width - dialog_width) // 2
-        y = parent_y + (parent_height - dialog_height) // 2
-
-        if x < 0:
-            x = 0
-        if y < 0:
-            y = 0
-
-        dialog.geometry(f"400x200+{x}+{y}")
+        # 중앙 위치 설정
+        center_window(dialog, self.root, 400, 200)
 
         # 배경색 설정
         dialog.configure(bg='#f8f9fa')
@@ -2764,27 +3321,8 @@ class PDFEmailSenderGUI:
         dialog.transient(self.root)
         dialog.grab_set()
 
-        # 부모 창 중앙에 위치
-        dialog.update_idletasks()
-        self.root.update_idletasks()
-
-        parent_x = self.root.winfo_x()
-        parent_y = self.root.winfo_y()
-        parent_width = self.root.winfo_width()
-        parent_height = self.root.winfo_height()
-
-        dialog_width = 400
-        dialog_height = 200
-
-        x = parent_x + (parent_width - dialog_width) // 2
-        y = parent_y + (parent_height - dialog_height) // 2
-
-        if x < 0:
-            x = 0
-        if y < 0:
-            y = 0
-
-        dialog.geometry(f"350x200+{x}+{y}")
+        # 중앙 위치 설정
+        center_window(dialog, self.root, 350, 200)
 
         # 배경색 설정
         dialog.configure(bg='#f8f9fa')
@@ -2856,27 +3394,8 @@ class PDFEmailSenderGUI:
         help_window.transient(self.root)
         help_window.grab_set()
 
-        # 부모 창 중앙에 위치
-        help_window.update_idletasks()
-        self.root.update_idletasks()
-
-        parent_x = self.root.winfo_x()
-        parent_y = self.root.winfo_y()
-        parent_width = self.root.winfo_width()
-        parent_height = self.root.winfo_height()
-
-        dialog_width = 800
-        dialog_height = 600
-
-        x = parent_x + (parent_width - dialog_width) // 2
-        y = parent_y + (parent_height - dialog_height) // 2
-
-        if x < 0:
-            x = 0
-        if y < 0:
-            y = 0
-
-        help_window.geometry(f"800x600+{x}+{y}")
+        # 중앙 위치 설정
+        center_window(help_window, self.root, 800, 600)
 
         # 메인 프레임
         main_frame = ttk.Frame(help_window, padding="20")
@@ -3018,12 +3537,20 @@ Q. 파일이 인식이 안 돼요?
             # 기존 연결이 있으면 종료
             self.disconnect_smtp()
 
-            # 새 연결 생성
-            self.connection_state['server_conn'] = smtplib.SMTP(
+            # 새 연결 생성 - 포트에 따라 SSL/TLS 선택
+            if smtp_port == 465:
+                # SSL 연결
+                self.connection_state['server_conn'] = smtplib.SMTP_SSL(
+                    smtp_server, smtp_port, timeout=30)
+                self.connection_state['server_conn'].ehlo()
+            else:
+                # TLS 연결
+                self.connection_state['server_conn'] = smtplib.SMTP(
                 smtp_server, smtp_port, timeout=30)
             self.connection_state['server_conn'].ehlo()
             self.connection_state['server_conn'].starttls()
             self.connection_state['server_conn'].ehlo()
+            
             self.connection_state['server_conn'].login(email, password)
 
             self.connection_state['connected'] = True
@@ -3559,8 +4086,16 @@ Q. 파일이 인식이 안 돼요?
             else:
                 # 새 연결 생성
                 self._thread_safe_log(f"   [DEBUG] 새 SMTP 연결 생성...", is_debug=True)
-            server = smtplib.SMTP(smtp_server, smtp_port, timeout=300)
+                
+                # 포트에 따라 SSL/TLS 선택
+                if smtp_port == 465:
+                    # SSL 연결
+                    server = smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=300)
+                else:
+                    # TLS 연결
+                    server = smtplib.SMTP(smtp_server, smtp_port, timeout=300)
             server.starttls()
+                
             server.login(sender_email, sender_password)
             self._thread_safe_log(f"   [DEBUG] SMTP 연결 성공", is_debug=True)
             
